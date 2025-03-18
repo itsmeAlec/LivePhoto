@@ -1,0 +1,29 @@
+{
+  "images" : [
+    {
+      "filename" : "Poster01.jpg",
+      "idiom" : "universal",
+      "scale" : "1x"
+    },
+    {
+      "filename" : "Poster01@2x.jpg",
+      "idiom" : "universal",
+      "scale" : "2x"
+    },
+    {
+      "filename" : "Poster01@3x.jpg",
+      "idiom" : "universal",
+      "scale" : "3x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  },
+  "properties" : {
+    "physical-size" : {
+      "height" : 0.297,
+      "width" : 0.21
+    }
+  }
+} 
