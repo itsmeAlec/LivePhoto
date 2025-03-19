@@ -87,10 +87,10 @@ extension PhotoScannerViewController {
         
         print("✅ Detected image: \(imageName)")
         
-        // Create a plane geometry matching the real-world size of the detected image
-        let width = CGFloat(detectedImage.physicalSize.width)
-        let height = CGFloat(detectedImage.physicalSize.height)
-        let plane = SCNPlane(width: width, height: height)
+        // Create a square plane geometry
+        // Use the smaller dimension to ensure it fits within the image
+        let size = min(CGFloat(detectedImage.physicalSize.width), CGFloat(detectedImage.physicalSize.height))
+        let plane = SCNPlane(width: size, height: size)
         
         // Load and setup video
         guard let videoURL = Bundle.main.url(forResource: imageName, withExtension: "mov") else {
@@ -98,14 +98,90 @@ extension PhotoScannerViewController {
             return
         }
         
-        // Create video player
-        let playerItem = AVPlayerItem(url: videoURL)
+        // Create video asset and get video track
+        let asset = AVURLAsset(url: videoURL)
+        guard let videoTrack = asset.tracks(withMediaType: .video).first else {
+            print("❌ No video track found in asset")
+            return
+        }
+        
+        // Check video orientation
+        let transform = videoTrack.preferredTransform
+        let isPortrait = transform.a == 0 && abs(transform.b) == 1 && abs(transform.c) == 1 && transform.d == 0
+        
+        // Create composition
+        let composition = AVMutableComposition()
+        guard let compositionTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else {
+            print("❌ Failed to create composition track")
+            return
+        }
+        
+        do {
+            try compositionTrack.insertTimeRange(
+                CMTimeRange(start: .zero, duration: asset.duration),
+                of: videoTrack,
+                at: .zero
+            )
+        } catch {
+            print("❌ Failed to insert time range: \(error)")
+            return
+        }
+        
+        // Create video composition for orientation correction
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        
+        // Set render size based on orientation
+        if isPortrait {
+            // For portrait videos, swap width and height
+            videoComposition.renderSize = CGSize(
+                width: videoTrack.naturalSize.height,
+                height: videoTrack.naturalSize.width
+            )
+        } else {
+            videoComposition.renderSize = videoTrack.naturalSize
+        }
+        
+        // Create transform instruction
+        let transformInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionTrack)
+        
+        // Apply transform based on orientation
+        if isPortrait {
+            // For portrait videos, rotate 90 degrees clockwise
+            transformInstruction.setTransform(
+                CGAffineTransform(rotationAngle: .pi / 2)
+                    .translatedBy(x: 0, y: -videoTrack.naturalSize.width),
+                at: .zero
+            )
+        }
+        
+        // Create main instruction
+        let mainInstruction = AVMutableVideoCompositionInstruction()
+        mainInstruction.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+        mainInstruction.layerInstructions = [transformInstruction]
+        
+        videoComposition.instructions = [mainInstruction]
+        
+        // Create player item with composition
+        let playerItem = AVPlayerItem(asset: composition)
+        playerItem.videoComposition = videoComposition
+        
+        // Create player
         let player = AVPlayer(playerItem: playerItem)
         self.videoPlayer = player
         
         // Setup video material
         let videoMaterial = SCNMaterial()
         videoMaterial.diffuse.contents = player
+        
+        // Configure video material to maintain aspect ratio
+        videoMaterial.diffuse.wrapS = .clamp
+        videoMaterial.diffuse.wrapT = .clamp
+        videoMaterial.diffuse.magnificationFilter = .linear
+        videoMaterial.diffuse.minificationFilter = .linear
         
         // Setup video looping
         NotificationCenter.default.addObserver(
@@ -122,7 +198,11 @@ extension PhotoScannerViewController {
         // Create and position the plane node
         let planeNode = SCNNode(geometry: plane)
         planeNode.eulerAngles.x = -.pi / 2  // Rotate to lay flat on the image
-        planeNode.position.z = 0.001  // Slightly above the image to avoid z-fighting
+        
+        // Center the square video on the image
+        let offsetX = (CGFloat(detectedImage.physicalSize.width) - size) / 2
+        let offsetY = (CGFloat(detectedImage.physicalSize.height) - size) / 2
+        planeNode.position = SCNVector3(offsetX, offsetY, 0)
         
         // Add the plane node to the anchor's node
         node.addChildNode(planeNode)
