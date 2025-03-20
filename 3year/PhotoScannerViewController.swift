@@ -68,6 +68,12 @@ class PhotoScannerViewController: UIViewController, ARSCNViewDelegate {
         super.viewWillDisappear(animated)
         sceneView.session.pause()
         videoPlayer?.pause()
+        
+        // Remove observers
+        if let playerItem = videoPlayer?.currentItem {
+            playerItem.removeObserver(self, forKeyPath: "status")
+        }
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
@@ -169,6 +175,19 @@ extension PhotoScannerViewController {
         let playerItem = AVPlayerItem(asset: composition)
         playerItem.videoComposition = videoComposition
         
+        // Add observers for player item status
+        NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak self] _ in
+            self?.videoPlayer?.seek(to: .zero)
+            self?.videoPlayer?.play()
+        }
+        
+        // Add observer for player item status
+        playerItem.addObserver(self, forKeyPath: "status", options: [.new, .initial], context: nil)
+        
         // Create player
         let player = AVPlayer(playerItem: playerItem)
         self.videoPlayer = player
@@ -182,16 +201,6 @@ extension PhotoScannerViewController {
         videoMaterial.diffuse.wrapT = .clamp
         videoMaterial.diffuse.magnificationFilter = .linear
         videoMaterial.diffuse.minificationFilter = .linear
-        
-        // Setup video looping
-        NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: playerItem,
-            queue: .main
-        ) { [weak self] _ in
-            self?.videoPlayer?.seek(to: .zero)
-            self?.videoPlayer?.play()
-        }
         
         plane.materials = [videoMaterial]
         
@@ -207,9 +216,24 @@ extension PhotoScannerViewController {
         // Add the plane node to the anchor's node
         node.addChildNode(planeNode)
         
-        // Start playing the video
-        player.play()
-        print("▶️ Started playing video for image: \(imageName)")
+        print("▶️ Video setup complete for image: \(imageName)")
+    }
+    
+    // Add observer method for video status
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        if keyPath == "status", let playerItem = object as? AVPlayerItem {
+            switch playerItem.status {
+            case .readyToPlay:
+                print("✅ Video is ready to play")
+                videoPlayer?.play()
+            case .failed:
+                print("❌ Video failed to load: \(String(describing: playerItem.error))")
+            case .unknown:
+                print("⚠️ Video status is unknown")
+            @unknown default:
+                break
+            }
+        }
     }
     
     func renderer(_ renderer: SCNSceneRenderer, didRemove node: SCNNode, for anchor: ARAnchor) {
